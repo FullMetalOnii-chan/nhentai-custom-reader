@@ -1,0 +1,2 @@
+# nhentai-custom-reader
+userscript
