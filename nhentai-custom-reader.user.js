@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Nhentai Custom Reader
-// @version      0.90.2
+// @version      0.90.3
 // @author       Full Metal Onii-chan
 // @homepageURL  https://github.com/FullMetalOnii-chan/nhentai-custom-reader#readme
 // @updateURL    https://github.com/FullMetalOnii-chan/nhentai-custom-reader/raw/master/nhentai-custom-reader.user.js
@@ -25,6 +25,7 @@
 
         colorTheme: '', // override color theme; matching default site themes - 'black', 'blue' and 'light'; if not set ('') - using account setting;
         hideCursor: true, // true or false, hide cursor when mouseover image;
+        hideNavigationBar: true, // true or false, hide navigation bar;
         defaultFit: '', // 'height', 'width', 'none', set reader image scaling; if not set ('') - using default 'none';
         turningDirection: 'right', // 'right' or 'left', click on set side of image will load next page; if not set ('') - any image click will load next page;
         preloadPages: 3, // 0 to 5, preload pages forward when reading;
@@ -46,6 +47,12 @@
         },
         get cursor() {
             return this.hideCursor ? 'none' : 'default';
+        },
+        get hide_navbar() {
+            return this.hideNavigationBar;
+        },
+        set hide_navbar(t) {
+            this.hideNavigationBar = t;
         },
         get image_scaling() {
             return this.defaultFit === 'width' ? 'fit-horizontal' : this.defaultFit === 'height' ? 'fit-vertical' : 'fit-none';
@@ -72,6 +79,135 @@
             return this.turningDirection ? this.turningDirection : 'both';
         }
     };
+    N.reader.prototype.update_direction = function(t, e) {
+        t + 1 === e ? this.direction = Math.min(3, this.direction + 1) : t - 1 === e ? this.direction = Math.max(-3, this.direction - 1) : this.direction = 0, console.log("Direction is now", this.direction)
+    };
+    N.reader.prototype.maybe_preload = function() {
+        var t = this.get_settings().preload,
+            e = [];
+        if (this.direction >= 0) var n = Math.min(this.current_page + 1, this.num_pages),
+            i = Math.min(this.num_pages, this.current_page + t) + 1,
+            r = 1;
+        else var n = Math.max(1, this.current_page - 1),
+            i = Math.max(1, this.current_page - t) - 1,
+            r = -1;
+        var e = N.range(n, i, r);
+        this.preload_pages(e);
+    };
+    N.reader.prototype.preload_pages = function(t) {
+        if (t.length) {
+            var e = this;
+            this.preload_timer && (clearTimeout(this.preload_timer), this.preload_timer = null), this.preload_timer = setTimeout(function() {
+                do {
+                    var n = t[0];
+                    t.shift()
+                } while (t.length && n in e.image_cache);
+                console.log("Preloading page", n);
+                var i = e.get_image(n);
+                N.bind(i.image, "load", function() {
+                    e.preload_pages(t)
+                })
+            }, 100)
+        } else if (this.settings.preloadBack && this.direction === 0 &&! (this.isCached())) {
+            this.direction--;
+            this.maybe_preload();
+        };
+    };
+    N.reader.prototype.isCached = function() {
+        var t = this.current_page,
+            e = this.image_cache,
+            n = Math.min(this.settings.preloadPages, t - 1);
+        for (var i = 1; i <= n; i++) {
+            if (!(e[t - i] && e[t - i].loaded)) {
+                return false;
+            };
+        };
+        return true;
+    };
+    N.reader.prototype.apply_settings = function() {
+        var t = this.get_settings(),
+            e = 0;
+        if (html.className !== t.theme) html.className = t.theme;
+        if (t.hide_navbar &&! body.classList.contains('nav-hidden')) body.classList.add('nav-hidden'), document.querySelector('#navbar').classList.add('hidden'), e++;
+        else if (!t.hide_navbar && body.classList.contains('nav-hidden')) body.classList.remove('nav-hidden'), document.querySelector('#navbar').classList.remove('hidden'), e++;
+        if (this.$image_container.className !== t.image_scaling) this.$image_container.className = t.image_scaling, document.querySelector('#' + t.image_scaling).classList.add('active'), e++;
+        if (e) this.resize();
+    };
+    N.reader.prototype.get_settings = function() {
+        var t = this.settings;
+        return {
+            theme: t.theme,
+            preload: t.preload,
+            turning_behavior: t.turning_behavior,
+            hide_navbar: t.hide_navbar,
+            image_scaling: t.image_scaling,
+            scroll_speed: t.scroll_speed
+        };
+    };
+    N.reader.prototype.set_settings = function(t) {
+        var e = this.settings;
+        if (e.theme !== t.theme) e.theme = t.theme;
+        if (e.hide_navbar !== t.hide_navbar) e.hide_navbar = t.hide_navbar;
+        if (e.image_scaling !== t.image_scaling) e.image_scaling = t.image_scaling;
+    };
+    N.reader.prototype.get_page_url = function(t) {
+        return N.format("/g/{0}/{1}/", this.gallery.id, t)
+    };
+    N.reader.prototype.get_extension = function(t) {
+        return {
+            j: "jpg",
+            p: "png",
+            g: "gif"
+        } [this.gallery.images.pages[t - 1].t]
+    };
+    N.reader.prototype.get_image_url = function(t) {
+        return N.format("{0}galleries/{1}/{2}.{3}", this.media_url, this.gallery.media_id, t, this.get_extension(t))
+    };
+    N.reader.prototype.get_thumbnail_url = function(t) {
+        return N.format("{0}galleries/{1}/{2}t.{3}", this.media_url, this.gallery.media_id, t, this.get_extension(t))
+    };
+    N.reader.prototype.get_image = function(t, e) {
+        if (!(t in this.image_cache)) {
+            e || (e = new Image, e.src = this.get_image_url(t)), this.image_cache[t] = {
+                image: e,
+                loaded: !1
+            }, e.width = this.gallery.images.pages[t - 1].w, e.height = this.gallery.images.pages[t - 1].h, e.removeAttribute("class");
+            var n = this,
+                i = function() {
+                    n.image_cache[t].loaded = !0, n.current_page === t && n.maybe_preload()
+                };
+            "decode" in e ? e.decode().then(i) : N.bind(e, "load", i)
+        }
+        return this.image_cache[t]
+    };
+    N.reader.prototype.set_page = function(t, e) {
+        if (t !== this.current_page) {
+            this.update_direction(this.current_page, t), console.debug("Switching to page", t), this.current_page = t, this.update_pagination(t);
+            var n = document.querySelector("#image-container img"),
+                i = this.get_image(t);
+            n !== i.image && (n.parentNode.appendChild(i.image), n.parentNode.removeChild(n)), i.loaded && this.maybe_preload(), e && history.replaceState && history.replaceState({
+                page: t
+            }, document.title, this.get_page_url(t)), this.$image_container.scrollTop = 0, body.scrollIntoView(), this.resize();
+        };
+    };
+    N.reader.prototype.previous_page = function() {
+        this.set_page(Math.max(1, this.current_page - 1), !0)
+    };
+    N.reader.prototype.next_page = function() {
+        this.set_page(Math.min(this.current_page + 1, this.num_pages), !0)
+    };
+    N.reader.prototype.update_pagination = function(t) {
+        document.title = document.title.replace(/Page (\d+) /, N.format("Page {0} ", t));
+        var e = this.num_pages,
+            n = document.querySelector('.page-prev').classList,
+            i = document.querySelector('.page-next').classList,
+            r = document.querySelector('a.drop-item.active');
+        if (e === 1) n.add('disabled'), i.add('disabled');
+        else if (t === 1) n.add('disabled');
+        else if (t === e) i.add('disabled');
+        else n.remove('disabled'), i.remove('disabled');
+        r && r.classList.remove('active'), document.querySelector('#page-' + t).classList.add('active'), document.querySelector('.pagination').innerHTML = t + ' of ' + e;
+    };
     N.reader.prototype.prepare = function() {
         var t = document.querySelector('#image-container img'),
             e = document.querySelector('#image-container a'),
@@ -80,17 +216,69 @@
         n.replaceChild(t, e), body.replaceChild(n, i);
         this.remove('script[src*="google-analytics"]', 'link[href*="main_style"]', 'meta[name="theme-color"]', 'nav', '.announcement', '#messages', '.advt', '#pagination-page-top', '#pagination-page-bottom', '.back-to-gallery');
     };
+    N.reader.prototype.clean = function() {
+        var t = this;
+        setTimeout(function() {
+            t.remove('body > div:last-child');
+        }, 100), N.install_analytics = function() {}, delete window.ga, delete window.GoogleAnalyticsObject;
+    };
     N.reader.prototype.remove = function(t) {
         for (var e = 0; e < arguments.length; e++ ) {
             var n = document.querySelectorAll(arguments[e]);
             if (n) for (var i = 0; i < n.length; i++) if (n[i].parentNode) n[i].parentNode.removeChild(n[i]);
         };
     };
-    N.reader.prototype.clean = function() {
-        var t = this;
-        setTimeout(function() {
-            t.remove('body > div:last-child');
-        }, 100), N.install_analytics = function() {}, delete window.ga, delete window.GoogleAnalyticsObject;
+    N.reader.prototype.resize = function() {
+        var t = this,
+            o = t.get_settings(),
+            e = t.$image_container;
+        if (t.current_page && t.settings.enableAutoscroll && o.image_scaling !== 'fit-vertical') {
+            var n = t.gallery.images.pages[t.current_page - 1],
+                i = { h: n.h, w: n.w },
+                r = [],
+                c = { h: e.clientHeight, w: e.clientWidth },
+                a = {},
+                s = e.querySelector('#scTop'),
+                u = e.querySelector('#scBot');
+            o.image_scaling === 'fit-none' && i.w <= c.w ? (a.h = i.h, a.w = i.w) : (a.h = c.w / i.w * i.h, a.w = c.w);
+            if (a.h <= c.h) {
+                s.classList.add('hidden');
+                u.classList.add('hidden');
+                return;
+            } else {
+                s.classList.remove('hidden');
+                u.classList.remove('hidden');
+            };
+            r[0] = o.image_scaling === 'fit-none' && a.w < c.w ? '--overlay-max-width: '+ a.w + 'px;' : '--overlay-max-width: 100%;';
+            r[1] = o.hide_navbar || t.isFullscreen() ? '--top-max-height: ' + t.settings.topHeight + '%; --bot-max-height: ' + t.settings.botHeight + '%;' : '--top-max-height: ' + Math.ceil(c.h * t.settings.topH) + 'px; --bot-max-height: ' + Math.ceil(c.h * t.settings.botH) + 'px;';
+            document.querySelector('#reader-dynamic').innerText = ':root { ' + r.join(' ') + ' }';
+        };
+    };
+    N.reader.prototype.isFullscreen = function () {
+        return document.fullScreen || document.fullscreenElement || document.msFullscreenElement || document.mozFullScreen || document.mozFullScreenElement || document.webkitIsFullScreen || document.webkitFullscreenElement;
+    };
+    N.reader.prototype.fullscreen = function() {
+        var t = this.$image_container;
+        if (t.requestFullscreen) {
+            t.requestFullscreen();
+        } else if (t.msRequestFullscreen) {
+            t.msRequestFullscreen();
+        } else if (t.mozRequestFullScreen) {
+            t.mozRequestFullScreen();
+        } else if (t.webkitRequestFullscreen) {
+            t.webkitRequestFullscreen();
+        };
+    };
+    N.reader.prototype.exitFullscreen = function() {
+        if (document.exitFullscreen) {
+            document.exitFullscreen();
+        } else if (document.msExitFullscreen) {
+            document.msExitFullscreen();
+        } else if (document.mozCancelFullScreen) {
+            document.mozCancelFullScreen();
+        } else if (document.webkitExitFullscreen) {
+            document.webkitExitFullscreen();
+        };
     };
     N.reader.prototype.create_pagination_dropdown = function() {
         var t = document.createElement('ul'),
@@ -153,128 +341,30 @@
         i.querySelector('.pagination').parentNode.appendChild(t.create_pagination_dropdown());
         n.appendChild(i), e.appendChild(n), body.replaceChild(e, body.firstChild);
     };
-    N.reader.prototype.update_direction = function(t, e) {
-        t + 1 === e ? this.direction = Math.min(3, this.direction + 1) : t - 1 === e ? this.direction = Math.max(-3, this.direction - 1) : this.direction = 0, console.log("Direction is now", this.direction)
-    };
-    N.reader.prototype.maybe_preload = function() {
-        var t = this.get_settings().preload,
-            e = [];
-        if (this.direction >= 0) var n = Math.min(this.current_page + 1, this.num_pages),
-            i = Math.min(this.num_pages, this.current_page + t) + 1,
-            r = 1;
-        else var n = Math.max(1, this.current_page - 1),
-            i = Math.max(1, this.current_page - t) - 1,
-            r = -1;
-        var e = N.range(n, i, r);
-        this.preload_pages(e);
-    };
-    N.reader.prototype.preload_pages = function(t) {
-        if (t.length) {
-            var e = this;
-            this.preload_timer && (clearTimeout(this.preload_timer), this.preload_timer = null), this.preload_timer = setTimeout(function() {
-                do {
-                    var n = t[0];
-                    t.shift()
-                } while (t.length && n in e.image_cache);
-                console.log("Preloading page", n);
-                var i = e.get_image(n);
-                N.bind(i.image, "load", function() {
-                    e.preload_pages(t)
-                })
-            }, 100)
-        } else if (this.settings.preloadBack && this.direction === 0 &&! (this.isCached())) {
-            this.direction--;
-            this.maybe_preload();
-        };
-    };
-    N.reader.prototype.isCached = function() {
-        var t = this.current_page,
-            e = this.image_cache,
-            n = Math.min(this.settings.preloadPages, t - 1);
-        for (var i = 1; i <= n; i++) {
-            if (!(e[t - i] && e[t - i].loaded)) {
-                return false;
-            };
-        };
-        return true;
-    };
-    N.reader.prototype.apply_settings = function() {
-        var t = this.get_settings();
-        if (html.className !== t.theme) html.className = t.theme;
-        if (this.$image_container.className !== t.image_scaling) this.$image_container.className = t.image_scaling, document.querySelector('#' + t.image_scaling).classList.add('active'), this.resize();
-    };
-    N.reader.prototype.get_settings = function() {
-        var t = this.settings;
-        return {
-            theme: t.theme,
-            preload: t.preload,
-            turning_behavior: t.turning_behavior,
-            image_scaling: t.image_scaling,
-            scroll_speed: t.scroll_speed
-        };
-    };
-    N.reader.prototype.set_settings = function(t) {
-        var e = this.settings;
-        if (e.theme !== t.theme) e.theme = t.theme;
-        if (e.image_scaling !== t.image_scaling) e.image_scaling = t.image_scaling;
-    };
-    N.reader.prototype.get_page_url = function(t) {
-        return N.format("/g/{0}/{1}/", this.gallery.id, t)
-    };
-    N.reader.prototype.get_extension = function(t) {
-        return {
-            j: "jpg",
-            p: "png",
-            g: "gif"
-        } [this.gallery.images.pages[t - 1].t]
-    };
-    N.reader.prototype.get_image_url = function(t) {
-        return N.format("{0}galleries/{1}/{2}.{3}", this.media_url, this.gallery.media_id, t, this.get_extension(t))
-    };
-    N.reader.prototype.get_thumbnail_url = function(t) {
-        return N.format("{0}galleries/{1}/{2}t.{3}", this.media_url, this.gallery.media_id, t, this.get_extension(t))
-    };
-    N.reader.prototype.get_image = function(t, e) {
-        if (!(t in this.image_cache)) {
-            e || (e = new Image, e.src = this.get_image_url(t)), this.image_cache[t] = {
-                image: e,
-                loaded: !1
-            }, e.width = this.gallery.images.pages[t - 1].w, e.height = this.gallery.images.pages[t - 1].h, e.removeAttribute("class");
-            var n = this,
-                i = function() {
-                    n.image_cache[t].loaded = !0, n.current_page === t && n.maybe_preload()
-                };
-            "decode" in e ? e.decode().then(i) : N.bind(e, "load", i)
-        }
-        return this.image_cache[t]
-    };
-    N.reader.prototype.set_page = function(t, e) {
-        if (t !== this.current_page) {
-            this.update_direction(this.current_page, t), console.debug("Switching to page", t), this.current_page = t, this.update_pagination(t);
-            var n = document.querySelector("#image-container img"),
-                i = this.get_image(t);
-            n !== i.image && (n.parentNode.appendChild(i.image), n.parentNode.removeChild(n)), i.loaded && this.maybe_preload(), e && history.replaceState && history.replaceState({
-                page: t
-            }, document.title, this.get_page_url(t)), this.$image_container.scrollTop = 0, body.scrollIntoView(), this.resize();
-        };
-    };
-    N.reader.prototype.previous_page = function() {
-        this.set_page(Math.max(1, this.current_page - 1), !0)
-    };
-    N.reader.prototype.next_page = function() {
-        this.set_page(Math.min(this.current_page + 1, this.num_pages), !0)
-    };
-    N.reader.prototype.update_pagination = function(t) {
-        document.title = document.title.replace(/Page (\d+) /, N.format("Page {0} ", t));
-        var e = this.num_pages,
-            n = document.querySelector('.page-prev').classList,
-            i = document.querySelector('.page-next').classList,
-            r = document.querySelector('a.drop-item.active');
-        if (e === 1) n.add('disabled'), i.add('disabled');
-        else if (t === 1) n.add('disabled');
-        else if (t === e) i.add('disabled');
-        else n.remove('disabled'), i.remove('disabled');
-        r && r.classList.remove('active'), document.querySelector('#page-' + t).classList.add('active'), document.querySelector('.pagination').innerHTML = t + ' of ' + e;
+    N.reader.prototype.install_autoscroll = function() {
+        var t = this,
+            e = null,
+            n = t.$image_container,
+            i = t.get_settings().scroll_speed,
+            r = document.createElement('div');
+        r.id = 'scBot', r.classList.add('overlay'), N.bind(r, 'mouseover', function() {
+            e && (clearInterval(e), e = null);
+            e = setInterval(function(){
+                n.scrollTop += i;
+            },5);
+        }), N.bind(r, 'mouseout', function(){
+            e && (clearInterval(e), e = null)
+        }), n.insertBefore(r, n.firstChild);
+
+        r = document.createElement('div');
+        r.id = 'scTop', r.classList.add('overlay'), N.bind(r, 'mouseover', function() {
+            e && (clearInterval(e), e = null);
+            e = setInterval(function(){
+                n.scrollTop -= i;
+            },5);
+        }), N.bind(r, 'mouseout', function(){
+            e && (clearInterval(e), e = null)
+        }), n.insertBefore(r, n.firstChild);
     };
     N.reader.prototype.install_key_handler = function() {
         var t = this,
@@ -317,6 +407,9 @@
                     case N.key.T:
                         document.querySelector('.themer').click();
                         break;
+                    case N.key.N:
+                        o.hide_navbar = !o.hide_navbar, t.set_settings(o), t.apply_settings();
+                        break;
                     case N.key.O:
                         console.log(o);
                         break;
@@ -338,9 +431,9 @@
                 var i = t.get_settings().turning_behavior,
                     r = n.pageX - (this.getBoundingClientRect().left - body.getBoundingClientRect().left),
                     o = r / this.getBoundingClientRect().width;
-                "both" === i || "left" === i && .5 > o || "right" === i && o > .5 ? t.next_page() : t.previous_page()
-            }
-        })
+                "both" === i || "left" === i && .5 > o || "right" === i && o > .5 ? t.next_page() : t.previous_page();
+            };
+        });
     };
     N.reader.prototype.install_navbar_handler = function() {
         var t = this;
@@ -388,86 +481,6 @@
             var n = Number(e.target.id.match(/\d+/));
             t.set_page(n, !0);
         })
-    };
-    N.reader.prototype.isFullscreen = function () {
-        return document.fullScreen || document.fullscreenElement || document.msFullscreenElement || document.mozFullScreen || document.mozFullScreenElement || document.webkitIsFullScreen || document.webkitFullscreenElement;
-    };
-    N.reader.prototype.fullscreen = function() {
-        var t = this.$image_container;
-        if (t.requestFullscreen) {
-            t.requestFullscreen();
-        } else if (t.msRequestFullscreen) {
-            t.msRequestFullscreen();
-        } else if (t.mozRequestFullScreen) {
-            t.mozRequestFullScreen();
-        } else if (t.webkitRequestFullscreen) {
-            t.webkitRequestFullscreen();
-        };
-    };
-    N.reader.prototype.exitFullscreen = function() {
-        if (document.exitFullscreen) {
-            document.exitFullscreen();
-        } else if (document.msExitFullscreen) {
-            document.msExitFullscreen();
-        } else if (document.mozCancelFullScreen) {
-            document.mozCancelFullScreen();
-        } else if (document.webkitExitFullscreen) {
-            document.webkitExitFullscreen();
-        };
-    };
-    N.reader.prototype.resize = function() {
-        var t = this,
-            e = t.get_settings(),
-            n = t.$image_container;
-        if (t.settings.enableAutoscroll && e.image_scaling !== 'fit-vertical') {
-            var i = t.isFullscreen() ? html.clientHeight : html.clientHeight - 41,
-                r = [],
-                o = window.getComputedStyle(n.querySelector('img')),
-                a = Number(o.height.slice(0, -2));
-            if (a === 0) {
-                N.bind('#image-container img', 'load', function() {
-                    t.resize();
-                });
-                return;
-            };
-            if (e.image_scaling === 'fit-horizontal') {
-                var s = n.querySelector('#scTop'),
-                    u = n.querySelector('#scBot');
-                a > i ? (a = i, s.classList.remove('hidden'), u.classList.remove('hidden')) : (s.classList.add('hidden'), u.classList.add('hidden'));
-                r[0] = ':root { --overlay-max-width: 100%;';
-            } else {
-                var s = Math.ceil(Number(o.width.slice(0, -2)) + 1);
-                r[0] = ':root { --overlay-max-width: '+ s + 'px;';
-                a = i;
-            };
-            r[1] = '--top-max-height: ' + Math.ceil(a * t.settings.topH) + 'px; --bot-max-height: ' + Math.ceil(a * t.settings.botH) + 'px; }';
-            document.querySelector('#reader-dynamic').innerText = r.join(' ');
-        };
-    };
-    N.reader.prototype.install_autoscroll = function() {
-        var t = this,
-            e = null,
-            n = t.$image_container,
-            i = t.get_settings().scroll_speed,
-            r = document.createElement('div');
-        r.id = 'scBot', r.classList.add('overlay', 'scroller'), N.bind(r, 'mouseover', function() {
-            e && (clearInterval(e), e = null);
-            e = setInterval(function(){
-                n.scrollTop += i;
-            },5);
-        }), N.bind(r, 'mouseout', function(){
-            e && (clearInterval(e), e = null)
-        }), n.insertBefore(r, n.firstChild);
-
-        r = document.createElement('div');
-        r.id = 'scTop', r.classList.add('overlay', 'scroller'), N.bind(r, 'mouseover', function() {
-            e && (clearInterval(e), e = null);
-            e = setInterval(function(){
-                n.scrollTop -= i;
-            },5);
-        }), N.bind(r, 'mouseout', function(){
-            e && (clearInterval(e), e = null)
-        }), n.insertBefore(r, n.firstChild);
     };
     N.reader.prototype.install_window_events = function() {
         var t = this;
@@ -522,12 +535,12 @@
             '.theme-blue body { color: #9b9b9b; background-color: #2a3744; }',
             '.theme-black body { color: #9b9b9b; background-color: #1f1f1f; }',
             '.hidden { display: none !important; visibility: hidden !important; }',
-            '#image-container { text-align: center; height: 100%; overflow: auto; -ms-overflow-style: none; outline: 0; }',
-            '#image-container.fit-horizontal { height: -moz-calc(100% - 41px); height: -webkit-calc(100% - 41px); height: calc(100% - 41px); }',
+            '#image-container { height: -moz-calc(100% - 41px); height: -webkit-calc(100% - 41px); height: calc(100% - 41px); width: 100%; text-align: center; overflow: auto; -ms-overflow-style: none; outline: 0; }',
+            '.nav-hidden > #image-container { height: 100%; }',
             '#image-container > * { cursor: ' + this.settings.cursor + '; }',
             'img { height: auto; width: auto; max-width: 100%; vertical-align: middle; border-style: none; }',
             '.fit-horizontal img { height: auto; width: 100%; }',
-            '.fit-vertical img { max-height: -moz-calc(100% - 41px); max-height: -webkit-calc(100% - 41px); max-height: calc(100% - 41px); width: auto; }',
+            '.fit-vertical img { max-height: 100%; width: auto; }',
             '#navbar { z-index: 1; width: 100%; position: static; top: 0; background-color: #2a3744; }',
             '.theme-blue #navbar { background-color: #202a34; }',
             '.theme-black #navbar { background-color: #0d0d0d; }',
@@ -567,8 +580,8 @@
             '.theme-black input { background-color: #383838; border-color: #000; }',
             '.overlay { position: fixed; left: 50%; transform: translateX(-50%); outline: none; height: 100%; width: 100%; max-width: var(--overlay-max-width); background-color: black; opacity: ' + this.settings.oop + '; }',
             '#scTop { max-height: var(--top-max-height); }',
-            '#scBot { max-height: var(--bot-max-height); bottom: 0%; }',
-            '.fit-vertical .scroller { display: none; }',
+            '#scBot { max-height: var(--bot-max-height); bottom: 0; }',
+            '.fit-vertical .overlay { display: none; }',
             '@media screen and (max-width: 900px) {',
             '.collapse { display: block; transition: height .5s; width: 100%; overflow: hidden; }',
             '.collapse.expanded { height: 290px; }',
@@ -594,10 +607,6 @@
             '.theme-black :-moz-full-screen { background: #000; }',
             '.theme-black :-ms-fullscreen { background: #000; }',
             '.theme-black :fullscreen { background: #000; }',
-            ':-webkit-full-screen.fit-vertical img { max-height: 100% !important; }',
-            ':-moz-full-screen.fit-vertical img { max-height: 100% !important; }',
-            ':-ms-fullscreen.fit-vertical img { max-height: 100% !important; }',
-            ':fullscreen.fit-vertical img { max-height: 100% !important; }',
             ':-webkit-full-screen { position: fixed; width: 100%; top: 0; }',
             '::placeholder { color: #a9a9a9; opacity: 1; }',
             ':-ms-input-placeholder { color: #a9a9a9; }',
@@ -627,6 +636,7 @@
         D: 68,
         F: 70,
         H: 72,
+        N: 78,
         O: 79,
         S: 83,
         T: 84,

@@ -1,3 +1,9 @@
+# 0.90.3
+
+- Add hide navigation bar setting; Keyboard shortcut 'N' - toggle show/hide;
+- Change slow resize function, shouldn't cause "forced reflow" anymore;
+- Adjust CSS;
+
 # 0.90.2
 
 - All functions now moved inside native reader constructor;
